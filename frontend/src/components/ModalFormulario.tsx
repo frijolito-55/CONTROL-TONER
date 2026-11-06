@@ -10,6 +10,10 @@ interface FormularioProps {
   setFormUbicacion: (v: string) => void;
   formModelo: string;
   setFormModelo: (v: string) => void;
+  formCodigoToner: string;
+  setFormCodigoToner: (v: string) => void;
+  formRendimientoFabrica: string;
+  setFormRendimientoFabrica: (v: string) => void;
   formReservaNegro: string;
   setFormReservaNegro: (v: string) => void;
   formReservaCian: string;
@@ -33,6 +37,10 @@ export default function ModalFormulario({
   setFormUbicacion,
   formModelo,
   setFormModelo,
+  formCodigoToner,
+  setFormCodigoToner,
+  formRendimientoFabrica,
+  setFormRendimientoFabrica,
   formReservaNegro,
   setFormReservaNegro,
   formReservaCian,
@@ -94,23 +102,14 @@ export default function ModalFormulario({
               <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
                 Modelo *
               </label>
-              <select
+              <input
+                type="text"
                 value={formModelo}
+                placeholder="Ej: TASKalfa 5004i"
                 disabled={enviando}
                 onChange={(e) => setFormModelo(e.target.value)}
                 className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-              >
-                <option value="ECOSYS M3655idn">ECOSYS M3655idn</option>
-                <option value="ECOSYS M5500">ECOSYS M5500</option>
-                <option value="ECOSYS M3040">ECOSYS M3040</option>
-                <option value="TASKalfa 4002i">TASKalfa 4002i</option>
-                <option value="TASKalfa 4003i">TASKalfa 4003i</option>
-                <option value="TASKalfa 3252ci">TASKalfa 3252ci</option>
-                <option value="TASKalfa 2554ci">TASKalfa 2554ci</option>
-                <option value="ECOSYS M2040dn">ECOSYS M2040dn</option>
-                <option value="ECOSYS M3550idn">ECOSYS M3550idn</option>
-                <option value="TASKalfa 3051ci">TASKalfa 3051ci</option>
-              </select>
+              />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
@@ -123,6 +122,37 @@ export default function ModalFormulario({
                 disabled={enviando}
                 onChange={(e) => setFormSerie(e.target.value)}
                 className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase disabled:bg-slate-100"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                Código de tóner *
+              </label>
+              <input
+                type="text"
+                placeholder="Ej: TK-3192"
+                value={formCodigoToner}
+                disabled={enviando}
+                onChange={(e) => setFormCodigoToner(e.target.value)}
+                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                Rendimiento (páginas) *
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Ej: 25000"
+                value={formRendimientoFabrica}
+                disabled={enviando}
+                onChange={(e) => setFormRendimientoFabrica(e.target.value)}
+                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
               />
             </div>
           </div>

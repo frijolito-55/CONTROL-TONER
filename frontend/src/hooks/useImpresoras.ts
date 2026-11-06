@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "../api";
 
 export interface ReporteHistorial {
+  id: number;
   fecha: string;
   contador: number;
   toner: number;
 }
 
 export interface MovimientoReserva {
+  id: number;
   fecha: string;
   tipo_movimiento: string;
   color: string;
@@ -45,15 +48,34 @@ export function useImpresoras() {
   const [formSerie, setFormSerie] = useState("");
   const [formIp, setFormIp] = useState("");
   const [formUbicacion, setFormUbicacion] = useState("");
-  const [formModelo, setFormModelo] = useState("ECOSYS M3655idn");
+  const [formModelo, setFormModelo] = useState("");
+  const [formCodigoToner, setFormCodigoToner] = useState("");
+  const [formRendimientoFabrica, setFormRendimientoFabrica] = useState("");
   const [formReservaNegro, setFormReservaNegro] = useState("0");
   const [formReservaCian, setFormReservaCian] = useState("0");
   const [formReservaMagenta, setFormReservaMagenta] = useState("0");
   const [formReservaAmarillo, setFormReservaAmarillo] = useState("0");
   const [formError, setFormError] = useState<string | null>(null);
 
+  const abrirExpediente = (impresora: Impresora) => {
+    window.history.pushState(
+      { vista: "expediente", impresoraId: impresora.id },
+      "",
+      window.location.href,
+    );
+    setImpresoraSeleccionada(impresora);
+  };
+
+  const volverAlPanel = () => {
+    if (window.history.state?.vista === "expediente") {
+      window.history.back();
+      return;
+    }
+    setImpresoraSeleccionada(null);
+  };
+
   const cargarImpresoras = useCallback(() => {
-    fetch("http://localhost:8000/api/impresoras")
+    apiFetch("/api/impresoras")
       .then((res) => {
         if (!res.ok) throw new Error("Fallo al conectar con la base de datos");
         return res.json();
@@ -76,10 +98,27 @@ export function useImpresoras() {
     cargarImpresoras();
   }, [cargarImpresoras]);
 
+  useEffect(() => {
+    const sincronizarVista = (event: PopStateEvent) => {
+      const state = event.state as { vista?: string; impresoraId?: number } | null;
+      if (state?.vista !== "expediente" || !state.impresoraId) {
+        setImpresoraSeleccionada(null);
+        return;
+      }
+
+      setImpresoraSeleccionada(
+        impresoras.find((impresora) => impresora.id === state.impresoraId) ?? null,
+      );
+    };
+
+    window.addEventListener("popstate", sincronizarVista);
+    return () => window.removeEventListener("popstate", sincronizarVista);
+  }, [impresoras]);
+
   const handleEjecutarRobot = async () => {
     setCargandoRobot(true);
     try {
-      const respuesta = await fetch("http://localhost:8000/api/parser/ejecutar", {
+      const respuesta = await apiFetch("/api/parser/ejecutar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
@@ -106,7 +145,7 @@ export function useImpresoras() {
 
     setReiniciandoInformes(true);
     try {
-      const respuesta = await fetch("http://localhost:8000/api/reportes", { method: "DELETE" });
+      const respuesta = await apiFetch("/api/reportes", { method: "DELETE" });
       const datos = await respuesta.json();
       if (!respuesta.ok) throw new Error(datos.detail || "No se pudieron eliminar los informes.");
       alert(`Reportes conservados: ${datos.reportes_correo_conservados} últimos de correo y ${datos.reportes_respaldo_conservados} de respaldo. Informes anteriores eliminados: ${datos.reportes_eliminados} B/N y ${datos.reportes_color_eliminados} a color.`);
@@ -118,10 +157,45 @@ export function useImpresoras() {
     }
   };
 
+  const handleEliminarReporte = async (reporteId: number) => {
+    if (!window.confirm("¿Eliminar este informe y sus niveles de tóner a color?")) return;
+
+    try {
+      const respuesta = await apiFetch(`/api/reportes/${reporteId}`, { method: "DELETE" });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) throw new Error(datos.detail || "No se pudo eliminar el informe.");
+      cargarImpresoras();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "No se pudo conectar con el servidor backend.");
+    }
+  };
+
+  const handleEliminarMovimiento = async (impresoraId: number, movimientoId: number) => {
+    if (!window.confirm("¿Eliminar este movimiento del historial? El stock actual no cambiará.")) return;
+
+    try {
+      const respuesta = await apiFetch(`/api/impresoras/${impresoraId}/reservas/movimientos/${movimientoId}`, {
+        method: "DELETE",
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) throw new Error(datos.detail || "No se pudo eliminar el movimiento.");
+      cargarImpresoras();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "No se pudo conectar con el servidor backend.");
+    }
+  };
+
   const handleGuardarImpresora = async (e: React.FormEvent): Promise<boolean> => {
     e.preventDefault();
     setFormError(null);
-    if (!formSerie.trim() || !formUbicacion.trim()) {
+    if (
+      !formSerie.trim() ||
+      !formUbicacion.trim() ||
+      !formModelo.trim() ||
+      !formCodigoToner.trim() ||
+      !formRendimientoFabrica.trim() ||
+      Number(formRendimientoFabrica) <= 0
+    ) {
       setFormError("Por favor llena los campos obligatorios (*)");
       return false;
     }
@@ -141,7 +215,9 @@ export function useImpresoras() {
       numero_serie: serieLimpia,
       ip: formIp.trim() || null,
       ubicacion: formUbicacion.trim(),
-      modelo_equipo: formModelo,
+      modelo_equipo: formModelo.trim(),
+      codigo_toner: formCodigoToner.trim(),
+      rendimiento_fabrica: parseInt(formRendimientoFabrica, 10),
       numero_maquina: elNum,
       lectura_contador: elContador ? parseInt(elContador) : null,
       porcentaje_toner: elToner ? parseInt(elToner) : null,
@@ -152,11 +228,11 @@ export function useImpresoras() {
     };
 
     const url = formId
-      ? `http://localhost:8000/api/impresoras/${formId}`
-      : "http://localhost:8000/api/impresoras";
+      ? `/api/impresoras/${formId}`
+      : "/api/impresoras";
 
     try {
-      const respuesta = await fetch(url, {
+      const respuesta = await apiFetch(url, {
         method: formId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -175,7 +251,7 @@ export function useImpresoras() {
 
   const handleEliminarImpresora = (id: number) => {
     if (!window.confirm("¿Estás seguro de eliminar esta impresora?")) return;
-    fetch(`http://localhost:8000/api/impresoras/${id}`, { method: "DELETE" })
+    apiFetch(`/api/impresoras/${id}`, { method: "DELETE" })
       .then((res) => {
         if (!res.ok) throw new Error("Error");
         setImpresoraSeleccionada(null);
@@ -192,6 +268,8 @@ export function useImpresoras() {
     setFormIp(imp.ip || "");
     setFormUbicacion(imp.ubicacion);
     setFormModelo(imp.modelo);
+    setFormCodigoToner(imp.codigo_toner);
+    setFormRendimientoFabrica(String(imp.rendimiento_fabrica));
     setFormReservaNegro(String(imp.stock_reserva?.negro ?? 0));
     setFormReservaCian(String(imp.stock_reserva?.cian ?? 0));
     setFormReservaMagenta(String(imp.stock_reserva?.magenta ?? 0));
@@ -211,7 +289,9 @@ export function useImpresoras() {
     setFormSerie("");
     setFormIp("");
     setFormUbicacion("");
-    setFormModelo("ECOSYS M3655idn");
+    setFormModelo("");
+    setFormCodigoToner("");
+    setFormRendimientoFabrica("");
     setFormReservaNegro("0");
     setFormReservaCian("0");
     setFormReservaMagenta("0");
@@ -264,18 +344,23 @@ export function useImpresoras() {
     cargando, error,
     cargandoRobot, handleEjecutarRobot,
     reiniciandoInformes, handleEliminarInformes,
+    handleEliminarReporte,
+    handleEliminarMovimiento,
     impresoraSeleccionada, setImpresoraSeleccionada,
     modalAbierto, setModalAbierto,
     formId, formSerie, setFormSerie,
     formIp, setFormIp,
     formUbicacion, setFormUbicacion,
     formModelo, setFormModelo,
+    formCodigoToner, setFormCodigoToner,
+    formRendimientoFabrica, setFormRendimientoFabrica,
     formReservaNegro, setFormReservaNegro,
     formReservaCian, setFormReservaCian,
     formReservaMagenta, setFormReservaMagenta,
     formReservaAmarillo, setFormReservaAmarillo,
     formError, cerrarModal,
     handleGuardarImpresora, handleEliminarImpresora,
+    abrirExpediente, volverAlPanel,
     abrirModalEditar, calcularPrediccionDias,
     obtenerColorSemaforo, impresorasFiltradas
   };

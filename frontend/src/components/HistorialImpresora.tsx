@@ -23,6 +23,7 @@ ChartJS.register(
 );
 
 interface ReporteHistorial {
+  id: number;
   fecha: string;
   contador: number;
   toner: number;
@@ -33,6 +34,7 @@ interface ReporteHistorial {
 }
 
 interface MovimientoReserva {
+  id: number;
   fecha: string;
   tipo_movimiento: string;
   color: string;
@@ -71,6 +73,8 @@ interface ExpedienteProps {
   onVolver: () => void;
   onEditar: (imp: Impresora) => void;
   onEliminar: (id: number) => void;
+  onEliminarReporte: (reporteId: number) => void;
+  onEliminarMovimiento: (impresoraId: number, movimientoId: number) => void;
   calcularPrediccionDias: (imp: Impresora) => string;
   obtenerColorSemaforo: (nivel: number) => {
     bg: string;
@@ -85,6 +89,8 @@ export default function HistorialImpresora({
   onVolver,
   onEditar,
   onEliminar,
+  onEliminarReporte,
+  onEliminarMovimiento,
   calcularPrediccionDias,
   obtenerColorSemaforo,
 }: ExpedienteProps) {
@@ -340,13 +346,14 @@ export default function HistorialImpresora({
                     <th className="px-6 py-3">Fecha del Reporte</th>
                     <th className="px-6 py-3">Contador (Páginas)</th>
                     <th className="px-6 py-3">Niveles de Tóner</th>
+                    <th className="px-3 py-3 text-right">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y bg-white">
                   {historialValido.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={3}
+                        colSpan={4}
                         className="px-6 py-8 text-center text-slate-400 bg-white"
                       >
                         📭 Aún no se han recibido reportes automáticos de esta
@@ -354,9 +361,9 @@ export default function HistorialImpresora({
                       </td>
                     </tr>
                   ) : (
-                    historialValido.map((rep, idx) => (
+                    historialValido.map((rep) => (
                       <tr
-                        key={idx}
+                        key={rep.id}
                         className="bg-white text-slate-800 hover:bg-slate-50/50 transition-all"
                       >
                         <td className="px-6 py-3">{formatoFecha(rep.fecha)}</td>
@@ -386,6 +393,17 @@ export default function HistorialImpresora({
                               </span>
                             </div>
                           )}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => onEliminarReporte(rep.id)}
+                            aria-label={`Eliminar informe del ${formatoFecha(rep.fecha)}`}
+                            title="Eliminar informe"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded text-lg font-semibold text-red-700 hover:bg-red-50"
+                          >
+                            ×
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -437,21 +455,22 @@ export default function HistorialImpresora({
                   <th className="px-6 py-3">Color</th>
                   <th className="px-6 py-3">Cantidad</th>
                   <th className="px-6 py-3">Detalle</th>
+                  <th className="px-3 py-3 text-right">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {(imp.historial_reserva || []).length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-6 py-6 text-center text-slate-400"
                     >
                       Sin movimientos de reserva registrados.
                     </td>
                   </tr>
                 ) : (
-                  (imp.historial_reserva || []).map((movimiento, idx) => (
-                    <tr key={`${movimiento.fecha}-${idx}`}>
+                  (imp.historial_reserva || []).map((movimiento) => (
+                    <tr key={movimiento.id}>
                       <td className="px-6 py-3 whitespace-nowrap">
                         {new Date(movimiento.fecha).toLocaleString("es-MX")}
                       </td>
@@ -465,6 +484,19 @@ export default function HistorialImpresora({
                           : movimiento.cantidad}
                       </td>
                       <td className="px-6 py-3">{movimiento.detalle}</td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onEliminarMovimiento(imp.id, movimiento.id)
+                          }
+                          aria-label={`Eliminar movimiento ${movimiento.tipo_movimiento} de tóner ${movimiento.color.toLowerCase()}`}
+                          title="Eliminar movimiento del historial"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded text-lg font-semibold text-red-700 hover:bg-red-50"
+                        >
+                          ×
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}

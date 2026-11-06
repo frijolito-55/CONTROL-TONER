@@ -1,4 +1,5 @@
 interface ReporteHistorial {
+  id: number;
   fecha: string;
   contador: number;
   toner: number;

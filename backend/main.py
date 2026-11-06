@@ -1,10 +1,14 @@
-from fastapi import FastAPI, Depends, HTTPException
+import os
+
+from fastapi import APIRouter, FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, selectinload
 from typing import List
 import models
+from auth import authenticate_admin, create_session, get_session_username, revoke_session, SESSION_TTL_SECONDS
 from database import get_db
+from settings import get_admin_credentials
 from pydantic import BaseModel, Field
 
 # =========================================================================
@@ -32,6 +36,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+def require_authenticated(request: Request):
+    username = get_session_username(request.cookies.get("toner_session"))
+    if username is None:
+        raise HTTPException(status_code=401, detail="Inicia sesión para continuar.")
+    return username
+
+
+protected_api = APIRouter(prefix="/api", dependencies=[Depends(require_authenticated)])
+
+
+class AdminLogin(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+def login(datos: AdminLogin, request: Request, response: Response):
+    if get_admin_credentials() is None:
+        raise HTTPException(status_code=503, detail="Configura el usuario y la contraseña de administrador en backend/.env.")
+    if not authenticate_admin(datos.username, datos.password):
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
+
+    token = create_session(datos.username)
+    response.set_cookie(
+        key="toner_session",
+        value=token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=os.getenv("TONER_AUTH_COOKIE_SECURE", "false").lower() == "true" or request.url.scheme == "https",
+        samesite="strict",
+        path="/",
+    )
+    return {"authenticated": True, "username": datos.username}
+
+
+@app.get("/api/auth/session")
+def check_session(request: Request):
+    username = get_session_username(request.cookies.get("toner_session"))
+    if username is None:
+        return {"authenticated": False}
+    return {"authenticated": True, "username": username}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    revoke_session(request.cookies.get("toner_session"))
+    response.delete_cookie(key="toner_session", httponly=True, samesite="strict", path="/")
+    return {"authenticated": False}
+
 # =========================================================================
 # 3. RUTA DE PRUEBA (Home)
 # =========================================================================
@@ -42,7 +96,7 @@ def read_root():
 # =========================================================================
 # 4. RUTA MAESTRA: OBTENER TODAS LAS IMPRESORAS (💥 ADAPTADA PARA GRÁFICA A COLOR)
 # =========================================================================
-@app.get("/api/impresoras")
+@protected_api.get("/impresoras")
 def obtener_impresoras(db: Session = Depends(get_db)):
     impresoras = db.query(models.Impresora).options(
         selectinload(models.Impresora.modelo).selectinload(models.ModeloToner.detalles_color),
@@ -84,6 +138,7 @@ def obtener_impresoras(db: Session = Depends(get_db)):
             for rep in sorted(imp.reportes, key=lambda x: (x.fecha_reporte, x.id)):
                 # Estructura base idéntica para mantener compatibilidad absoluta con B/N
                 data_reporte = {
+                    "id": rep.id,
                     "fecha": str(rep.fecha_reporte), 
                     "contador": rep.contador_paginas,
                     "toner": rep.porcentaje_toner  # Mantiene compatibilidad directa con tu gráfica actual
@@ -116,6 +171,7 @@ def obtener_impresoras(db: Session = Depends(get_db)):
 
         historial_reserva = [
             {
+                "id": item.id,
                 "fecha": item.fecha_movimiento.isoformat() if item.fecha_movimiento else None,
                 "tipo_movimiento": item.tipo_movimiento,
                 "color": item.color,
@@ -148,7 +204,9 @@ class ImpresoraCreate(BaseModel):
     numero_serie: str
     ip: str | None = None
     ubicacion: str
-    modelo_equipo: str
+    modelo_equipo: str = Field(min_length=1, max_length=50)
+    codigo_toner: str | None = Field(default=None, max_length=30)
+    rendimiento_fabrica: int | None = Field(default=None, gt=0)
     numero_maquina: str | None = None
     lectura_contador: int | None = None
     porcentaje_toner: int | None = None
@@ -161,6 +219,34 @@ class ImpresoraCreate(BaseModel):
     reserva_cian: int | None = Field(default=None, ge=0)
     reserva_magenta: int | None = Field(default=None, ge=0)
     reserva_amarillo: int | None = Field(default=None, ge=0)
+
+
+def obtener_o_crear_modelo(db: Session, datos: ImpresoraCreate):
+    nombre_modelo = datos.modelo_equipo.strip()
+    if not nombre_modelo:
+        raise HTTPException(status_code=400, detail="El nombre del modelo es obligatorio.")
+
+    modelo = db.query(models.ModeloToner).filter(
+        models.ModeloToner.modelo_equipo == nombre_modelo
+    ).first()
+    if modelo:
+        return modelo
+
+    codigo_toner = datos.codigo_toner.strip() if datos.codigo_toner else ""
+    if not codigo_toner or datos.rendimiento_fabrica is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Para registrar un modelo nuevo indica su código de tóner y rendimiento de fábrica.",
+        )
+
+    modelo = models.ModeloToner(
+        modelo_equipo=nombre_modelo,
+        codigo_toner=codigo_toner,
+        rendimiento_fabrica=datos.rendimiento_fabrica,
+    )
+    db.add(modelo)
+    db.flush()
+    return modelo
 
 
 def sincronizar_inventario_reserva(db: Session, impresora_id: int, modelo, datos: ImpresoraCreate, es_alta: bool = False):
@@ -204,14 +290,12 @@ def sincronizar_inventario_reserva(db: Session, impresora_id: int, modelo, datos
 # =========================================================================
 # 6. RUTA POST UNIFICADA (💥 BLINDAJE EXTREMO CONTRA CLONES EN TIEMPO REAL)
 # =========================================================================
-@app.post("/api/impresoras")
+@protected_api.post("/impresoras")
 def crear_impresora(impresora: ImpresoraCreate, db: Session = Depends(get_db)):
     serie_limpia = impresora.numero_serie.strip().upper()
     
     # 1. Validar modelo en el catálogo
-    modelo = db.query(models.ModeloToner).filter(models.ModeloToner.modelo_equipo == impresora.modelo_equipo).first()
-    if not modelo:
-        raise HTTPException(status_code=400, detail=f"El modelo '{impresora.modelo_equipo}' no existe en el catálogo.")
+    modelo = obtener_o_crear_modelo(db, impresora)
     
     # 2. Guardar la Impresora usando un bloque try-except
     nueva_imp = models.Impresora(
@@ -266,7 +350,7 @@ def crear_impresora(impresora: ImpresoraCreate, db: Session = Depends(get_db)):
 # =========================================================================
 # 7. RUTA PARA ELIMINAR UNA IMPRESORA
 # =========================================================================
-@app.delete("/api/impresoras/{impresora_id}")
+@protected_api.delete("/impresoras/{impresora_id}")
 def eliminar_impresora(impresora_id: int, db: Session = Depends(get_db)):
     imp = db.query(models.Impresora).filter(models.Impresora.id == impresora_id).first()
     if not imp:
@@ -277,7 +361,7 @@ def eliminar_impresora(impresora_id: int, db: Session = Depends(get_db)):
     return {"message": "Impresora eliminada correctamente"}
 
 
-@app.delete("/api/reportes")
+@protected_api.delete("/reportes")
 def eliminar_todos_los_reportes(db: Session = Depends(get_db)):
     reportes_ordenados = db.query(
         models.HistorialReporte.id.label("id"),
@@ -323,18 +407,47 @@ def eliminar_todos_los_reportes(db: Session = Depends(get_db)):
         "reportes_color_eliminados": reportes_color_eliminados,
     }
 
+
+@protected_api.delete("/reportes/{reporte_id}")
+def eliminar_reporte(reporte_id: int, db: Session = Depends(get_db)):
+    reporte = db.query(models.HistorialReporte).filter(
+        models.HistorialReporte.id == reporte_id
+    ).first()
+    if not reporte:
+        raise HTTPException(status_code=404, detail="El informe no existe.")
+
+    db.query(models.HistorialReporteColor).filter(
+        models.HistorialReporteColor.impresora_id == reporte.impresora_id,
+        models.HistorialReporteColor.fecha_reporte == reporte.fecha_reporte,
+    ).delete(synchronize_session=False)
+    db.delete(reporte)
+    db.commit()
+    return {"message": "Informe y niveles de color eliminados correctamente."}
+
+
+@protected_api.delete("/impresoras/{impresora_id}/reservas/movimientos/{movimiento_id}")
+def eliminar_movimiento_reserva(impresora_id: int, movimiento_id: int, db: Session = Depends(get_db)):
+    movimiento = db.query(models.HistorialReserva).filter(
+        models.HistorialReserva.id == movimiento_id,
+        models.HistorialReserva.impresora_id == impresora_id,
+    ).first()
+    if not movimiento:
+        raise HTTPException(status_code=404, detail="El movimiento no existe.")
+
+    db.delete(movimiento)
+    db.commit()
+    return {"message": "Movimiento eliminado del historial. El inventario no fue modificado."}
+
 # =========================================================================
 # 8. RUTA PUT UNIFICADA (Edición de datos con actualización inteligente)
 # =========================================================================
-@app.put("/api/impresoras/{impresora_id}")
+@protected_api.put("/impresoras/{impresora_id}")
 def actualizar_impresora(impresora_id: int, datos: ImpresoraCreate, db: Session = Depends(get_db)):
     imp = db.query(models.Impresora).filter(models.Impresora.id == impresora_id).first()
     if not imp:
         raise HTTPException(status_code=404, detail="La impresora no existe.")
     
-    modelo = db.query(models.ModeloToner).filter(models.ModeloToner.modelo_equipo == datos.modelo_equipo).first()
-    if not modelo:
-        raise HTTPException(status_code=400, detail="Modelo no válido.")
+    modelo = obtener_o_crear_modelo(db, datos)
 
     imp.numero_serie = datos.numero_serie.strip().upper()
     imp.ip = datos.ip.strip() if datos.ip else None
@@ -396,7 +509,7 @@ def actualizar_impresora(impresora_id: int, datos: ImpresoraCreate, db: Session 
 # =========================================================================
 # 9. NUEVO ENDPOINT: DISPARAR EL ROBOT EXTRACTOR POP3 DESDE EL FRONTEND
 # =========================================================================
-@app.post("/api/parser/ejecutar")
+@protected_api.post("/parser/ejecutar")
 def disparar_extractor_pop3():
     """Ejecuta de forma segura el robot extractor POP3 y procesa las alertas nuevas."""
     try:
@@ -411,3 +524,6 @@ def disparar_extractor_pop3():
             status_code=500, 
             detail=f"Error crítico al ejecutar el robot Parser: {str(e)}"
         )
+
+
+app.include_router(protected_api)

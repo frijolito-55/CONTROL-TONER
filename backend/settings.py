@@ -1,5 +1,8 @@
 import os
+from dotenv import load_dotenv
 
+# Forzar la carga del archivo .env antes de cualquier validación
+load_dotenv()
 
 def _required_environment_value(name: str) -> str:
     value = os.getenv(name, "").strip()
@@ -25,3 +28,11 @@ def get_email_settings() -> tuple[str, str, str, int]:
         os.getenv("TONER_POP3_SERVER", "pop.gmail.com"),
         int(os.getenv("TONER_POP3_PORT", "995")),
     )
+
+
+def get_admin_credentials() -> tuple[str, str] | None:
+    username = os.getenv("TONER_ADMIN_USER", "").strip()
+    password = os.getenv("TONER_ADMIN_PASSWORD", "")
+    if not username or not password.strip():
+        return None
+    return username, password

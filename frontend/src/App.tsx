@@ -1,10 +1,18 @@
+import { useEffect, useState } from "react";
 import Filtros from "./components/Filtros";
 import TarjetaImpresora from "./components/TarjetaImpresora";
 import ModalFormulario from "./components/ModalFormulario";
 import HistorialImpresora from "./components/HistorialImpresora";
+import Login from "./components/Login";
+import { apiFetch } from "./api";
 import { useImpresoras } from "./hooks/useImpresoras";
 
-export default function App() {
+interface ControlPanelProps {
+  username: string;
+  onLogout: () => void;
+}
+
+function ControlPanel({ username, onLogout }: ControlPanelProps) {
   const {
     busqueda,
     setBusqueda,
@@ -16,8 +24,11 @@ export default function App() {
     handleEjecutarRobot,
     reiniciandoInformes,
     handleEliminarInformes,
+    handleEliminarReporte,
+    handleEliminarMovimiento,
     impresoraSeleccionada,
-    setImpresoraSeleccionada,
+    abrirExpediente,
+    volverAlPanel,
     modalAbierto,
     setModalAbierto,
     formId,
@@ -29,6 +40,10 @@ export default function App() {
     setFormUbicacion,
     formModelo,
     setFormModelo,
+    formCodigoToner,
+    setFormCodigoToner,
+    formRendimientoFabrica,
+    setFormRendimientoFabrica,
     formReservaNegro,
     setFormReservaNegro,
     formReservaCian,
@@ -58,6 +73,10 @@ export default function App() {
       setFormUbicacion={setFormUbicacion}
       formModelo={formModelo}
       setFormModelo={setFormModelo}
+      formCodigoToner={formCodigoToner}
+      setFormCodigoToner={setFormCodigoToner}
+      formRendimientoFabrica={formRendimientoFabrica}
+      setFormRendimientoFabrica={setFormRendimientoFabrica}
       formReservaNegro={formReservaNegro}
       setFormReservaNegro={setFormReservaNegro}
       formReservaCian={formReservaCian}
@@ -93,9 +112,11 @@ export default function App() {
       <>
         <HistorialImpresora
           imp={impresoraSeleccionada}
-          onVolver={() => setImpresoraSeleccionada(null)}
+          onVolver={volverAlPanel}
           onEditar={abrirModalEditar}
           onEliminar={handleEliminarImpresora}
+          onEliminarReporte={handleEliminarReporte}
+          onEliminarMovimiento={handleEliminarMovimiento}
           calcularPrediccionDias={calcularPrediccionDias}
           obtenerColorSemaforo={obtenerColorSemaforo}
         />
@@ -144,6 +165,13 @@ export default function App() {
           >
             <span>Agregar Impresora</span>
           </button>
+          <button
+            onClick={onLogout}
+            title={`Sesión de ${username}`}
+            className="border border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-sm px-4 py-2 rounded-lg cursor-pointer transition-colors"
+          >
+            Cerrar sesión
+          </button>
         </div>
       </header>
 
@@ -164,7 +192,7 @@ export default function App() {
               <TarjetaImpresora
                 key={imp.id}
                 imp={imp}
-                onSelect={setImpresoraSeleccionada}
+                onSelect={abrirExpediente}
                 obtenerColorSemaforo={obtenerColorSemaforo}
               />
             ))}
@@ -174,5 +202,53 @@ export default function App() {
 
       {modalFormulario}
     </div>
+  );
+}
+
+export default function App() {
+  const [comprobandoSesion, setComprobandoSesion] = useState(true);
+  const [username, setUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    apiFetch("/api/auth/session")
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelado) return;
+        setUsername(data?.username ?? null);
+        setComprobandoSesion(false);
+      })
+      .catch(() => {
+        if (cancelado) return;
+        setUsername(null);
+        setComprobandoSesion(false);
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  const cerrarSesion = async () => {
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      window.history.replaceState(null, "", window.location.href);
+      setUsername(null);
+    }
+  };
+
+  if (comprobandoSesion) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  if (!username) return <Login onSuccess={setUsername} />;
+  return (
+    <ControlPanel key={username} username={username} onLogout={cerrarSesion} />
   );
 }
